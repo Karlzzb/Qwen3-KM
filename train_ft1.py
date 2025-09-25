@@ -300,7 +300,7 @@ if os.path.exists(dataset_path):
 else:
     raise ValueError(f"原始数据集地址：{dataset_path} 不存在")
 full_df = pd.read_json(jsonl_new_path, lines=True)
-sampled_df = full_df.sample(frac=0.02, random_state=42) #只取2%数据做一个预研
+sampled_df = full_df.sample(frac=0.2, random_state=42) #只取20%数据做一个预研
 train_df, eval_df = train_test_split(
     sampled_df,
     test_size=0.2,
