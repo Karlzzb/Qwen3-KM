@@ -1,0 +1,32 @@
+# 虚拟环境
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+
+# 日志文件
+*.log
+
+# 数据文件
+*.csv
+*.json
+*.pkl
+
+# 模型文件
+*.pth
+*.pt
+*.bin
+models/
+swanlog/
+output/
+data/
