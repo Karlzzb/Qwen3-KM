@@ -108,7 +108,7 @@ class MedicalAssistant:
         # 加载模型
         self.model = AutoModelForCausalLM.from_pretrained(
             self.checkpoint_path, 
-            torch_dtype=self.dtype,
+            dtype=self.dtype,
             local_files_only=True  # 只使用本地文件
         )
         self.model.to(self.device)

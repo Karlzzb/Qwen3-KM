@@ -11,7 +11,7 @@ os.environ["TORCH_USE_CUDA_DSA"] = "1"  # 启用设备端断言
 
 warnings.filterwarnings("ignore", message="The pynvml package is deprecated.")
 
-PROMPT = "你是一个医学专家，你需要根据用户的问题，给出带有思考的回答。"
+PROMPT = "你是一个医学专家，你需要根据用户的问题，提炼出核心问题，指定科室, 并给出诊断结果和治疗意见。"
 MAX_NEW_TOKENS = 2048
 RETRY_ATTEMPTS = 3
 
@@ -172,9 +172,8 @@ def predict(messages, model, tokenizer, device, attempt=0,
 def main():
     # 自动查找最新的 checkpoint
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    output_dir = os.path.join(script_dir, "output/Qwen3-0.6B")
+    output_dir = os.path.join(script_dir, "output/Qwen3-0.6B-lora")
     latest_checkpoint = "checkpoint-1000"
-    
     if os.path.isdir(output_dir):
         checkpoints = [
             d for d in os.listdir(output_dir)

@@ -11,7 +11,7 @@ from sklearn.model_selection import train_test_split
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["SWANLAB_PROJECT"]="qwen3-sft-medical"
-PROMPT = "你是一个医学专家，你需要根据用户的问题，提炼出核心问题，指定科室, 并给出诊断结果和治疗意见"
+PROMPT = "你是一个医学专家，你需要根据用户的问题，提炼出核心问题，指定科室, 并给出诊断结果和治疗意见。"
 MAX_LENGTH = 2048
 MAX_NEW_TOKENS = 512
 swanlab.config.update({
@@ -261,17 +261,8 @@ model_name = "Qwen/Qwen3-0.6B"
 script_path = os.path.dirname(os.path.abspath(__file__))
 cache_path = os.path.join(script_path, "models")
 
-# 在modelscope上下载Qwen模型到本地目录下
-model_dir = snapshot_download(model_name, cache_dir=cache_path, revision="master")
-
 # Transformers加载模型权重（本地）
 device, load_dtype = select_device_and_dtype()
-
-tokenizer = AutoTokenizer.from_pretrained(model_dir, use_fast=False, trust_remote_code=True)
-# 确保存在pad token，便于padding
-if tokenizer.pad_token is None and tokenizer.eos_token is not None:
-    tokenizer.pad_token = tokenizer.eos_token
-
 
 # 自动查找之前最新的 checkpoint
 # 构造相对于脚本所在目录的路径，使其不受运行位置的影响
@@ -289,8 +280,14 @@ if os.path.isdir(pre_output_dir):
         latest_checkpoint = os.path.join(pre_output_dir, checkpoints[-1])
         print(f"INFO: 自动找到最新的 checkpoint: {latest_checkpoint}")
 model = AutoModelForCausalLM.from_pretrained(latest_checkpoint, dtype=load_dtype)
+tokenizer = AutoTokenizer.from_pretrained(latest_checkpoint, use_fast=False, trust_remote_code=True)
 model.enable_input_require_grads()  # 开启梯度检查点时，要执行该方法
 model.to(device)
+
+
+# 确保存在pad token，便于padding
+if tokenizer.pad_token is None and tokenizer.eos_token is not None:
+    tokenizer.pad_token = tokenizer.eos_token
 
 # 加载、处理数据集和测试集
 dataset_path = os.path.join(script_path, "data/raw_data_ft1.csv")
@@ -300,7 +297,8 @@ if os.path.exists(dataset_path):
 else:
     raise ValueError(f"原始数据集地址：{dataset_path} 不存在")
 full_df = pd.read_json(jsonl_new_path, lines=True)
-sampled_df = full_df.sample(frac=0.2, random_state=42) #只取20%数据做一个预研
+# 整体数据量较大，我们只取一部分用作训练
+sampled_df = full_df.sample(frac=0.02, random_state=42)
 train_df, eval_df = train_test_split(
     sampled_df,
     test_size=0.2,
@@ -327,8 +325,9 @@ args = TrainingArguments(
     eval_steps=100,
     logging_steps=10,
     num_train_epochs=2,
-    save_steps=200,
-    learning_rate=5e-5,
+    save_steps=400,
+    # learning_rate=5e-5,
+    learning_rate=1e-4,
     save_on_each_node=True,
     gradient_checkpointing=False, # 开启以节省显存，关闭追求最大训练速度
     report_to="swanlab",
