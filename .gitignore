@@ -30,3 +30,5 @@ models/
 swanlog/
 output/
 data/
+._____temp/
+.lock
