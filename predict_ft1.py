@@ -11,7 +11,7 @@ os.environ["TORCH_USE_CUDA_DSA"] = "1"  # 启用设备端断言
 
 warnings.filterwarnings("ignore", message="The pynvml package is deprecated.")
 
-PROMPT = "你是一个医学专家，你需要根据用户的问题，提炼出核心问题，并指定科室"
+PROMPT = "你是一个医学专家，你需要根据用户的问题，提炼出核心问题，指定科室, 并给出诊断结果和治疗意见"
 MAX_NEW_TOKENS = 2048
 RETRY_ATTEMPTS = 3
 
