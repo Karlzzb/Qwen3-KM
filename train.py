@@ -7,6 +7,7 @@ from modelscope import snapshot_download
 import os
 import swanlab
 import gc
+from config import global_config
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["SWANLAB_PROJECT"]="qwen3-sft-medical"
@@ -14,7 +15,7 @@ PROMPT = "你是一个医学专家，你需要根据用户的问题，给出带�
 MAX_LENGTH = 2048
 MAX_NEW_TOKENS = 512
 swanlab.config.update({
-    "model": "Qwen/Qwen3-0.6B",
+    "model": global_config.TRAIN_MODEL,
     "prompt": PROMPT,
     "data_max_length": MAX_LENGTH,
     })
@@ -231,14 +232,12 @@ def predict(messages, model, tokenizer, device, attempt=0,
 
 
 # 定义模型名称
-model_name = "Qwen/Qwen3-0.6B"
-
 # 获取脚本所在目录，并创建模型缓存路径
 script_path = os.path.dirname(os.path.abspath(__file__))
 cache_path = os.path.join(script_path, "models")
 
 # 在modelscope上下载Qwen模型到本地目录下
-model_dir = snapshot_download(model_name, cache_dir=cache_path, revision="master")
+model_dir = snapshot_download(global_config.TRAIN_MODEL, cache_dir=cache_path, revision="master")
 
 # Transformers加载模型权重（本地）
 device, load_dtype = select_device_and_dtype()
@@ -278,7 +277,7 @@ eval_dataset = eval_ds.map(process_func, remove_columns=eval_ds.column_names)
 collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True, label_pad_token_id=-100)
 
 args = TrainingArguments(
-    output_dir=os.path.join(script_path, "output/Qwen3-0.6B"),
+    output_dir=os.path.join(script_path, global_config.OUTPUT_DIR),
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     gradient_accumulation_steps=4,
@@ -291,7 +290,7 @@ args = TrainingArguments(
     save_on_each_node=True,
     gradient_checkpointing=False,
     report_to="swanlab",
-    run_name="qwen3-0.6B",
+    run_name=global_config.MODEL_VERSION,
 )
 
 trainer = Trainer(

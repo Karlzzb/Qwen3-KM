@@ -3,11 +3,11 @@ import pandas as pd
 import torch
 from datasets import Dataset
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments, Trainer, DataCollatorForSeq2Seq
-from modelscope import snapshot_download
 import os
 import swanlab
 import gc
 from sklearn.model_selection import train_test_split
+from config import global_config
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 os.environ["SWANLAB_PROJECT"]="qwen3-sft-medical"
@@ -15,7 +15,7 @@ PROMPT = "你是一个医学专家，你需要根据用户的问题，提炼出�
 MAX_LENGTH = 2048
 MAX_NEW_TOKENS = 512
 swanlab.config.update({
-    "model": "Qwen/Qwen3-0.6B-ft1",
+    "model": f"{global_config.TRAIN_MODEL}-ft1",
     "prompt": PROMPT,
     "data_max_length": MAX_LENGTH,
     })
@@ -254,9 +254,6 @@ def predict(messages, model, tokenizer, device, attempt=0,
             return None
 
 
-# 定义模型名称
-model_name = "Qwen/Qwen3-0.6B"
-
 # 获取脚本所在目录，并创建模型缓存路径
 script_path = os.path.dirname(os.path.abspath(__file__))
 cache_path = os.path.join(script_path, "models")
@@ -267,7 +264,7 @@ device, load_dtype = select_device_and_dtype()
 # 自动查找之前最新的 checkpoint
 # 构造相对于脚本所在目录的路径，使其不受运行位置的影响
 script_dir = os.path.dirname(os.path.abspath(__file__))
-pre_output_dir = os.path.join(script_dir, "output/Qwen3-0.6B")
+pre_output_dir = os.path.join(script_dir, f"{global_config.OUTPUT_DIR}")
 latest_checkpoint = "checkpoint-1000"
 if os.path.isdir(pre_output_dir):
     checkpoints = [
@@ -298,7 +295,7 @@ else:
     raise ValueError(f"原始数据集地址：{dataset_path} 不存在")
 full_df = pd.read_json(jsonl_new_path, lines=True)
 # 整体数据量较大，我们只取一部分用作训练
-sampled_df = full_df.sample(frac=0.02, random_state=42)
+sampled_df = full_df.sample(frac=0.2, random_state=42)
 train_df, eval_df = train_test_split(
     sampled_df,
     test_size=0.2,
@@ -317,7 +314,7 @@ eval_dataset = eval_ds.map(process_func, remove_columns=eval_ds.column_names)
 collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True, label_pad_token_id=-100)
 
 args = TrainingArguments(
-    output_dir=os.path.join(script_path, "output/Qwen3-0.6B-ft1"),
+    output_dir=os.path.join(script_path, f"{global_config.OUTPUT_DIR}-ft1"),
     per_device_train_batch_size=1,
     per_device_eval_batch_size=1,
     gradient_accumulation_steps=4,
@@ -331,7 +328,7 @@ args = TrainingArguments(
     save_on_each_node=True,
     gradient_checkpointing=False, # 开启以节省显存，关闭追求最大训练速度
     report_to="swanlab",
-    run_name="qwen3-0.6B-ft1",
+    run_name=f"{global_config.MODEL_VERSION}-ft1",
     # 添加以下优化参数
     warmup_steps=100,  # 添加热身
     weight_decay=0.01,  # 添加权重衰减

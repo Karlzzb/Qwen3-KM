@@ -1,0 +1,19 @@
+import os
+from dataclasses import dataclass
+from dotenv import load_dotenv
+
+load_dotenv()  # 加载.env文件中的环境变量
+
+
+@dataclass
+class Config:
+    """基础配置类"""
+    BASE_MODEL: str = os.getenv("BASE_MODEL")
+    MODEL_VERSION:str = os.getenv("MODEL_VERSION")
+    TRAIN_MODEL:str = f"{BASE_MODEL}/{MODEL_VERSION}"
+    OUTPUT_DIR:str = f"output/{MODEL_VERSION}"
+
+
+
+# 创建配置实例
+global_config = Config()
