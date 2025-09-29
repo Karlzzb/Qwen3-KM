@@ -6,7 +6,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments,
 import os
 import swanlab
 import gc
-from sklearn.model_selection import train_test_split
 from config import global_config
 
 os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
@@ -20,56 +19,6 @@ swanlab.config.update({
     "data_max_length": MAX_LENGTH,
     })
 
-def is_row_valid(data, required_columns):
-    """
-    检查行数据是否有效
-    无效数据过滤
-    """
-    for col in required_columns:
-        if pd.isna(data[col]) or data[col] is None:
-            return False, col
-        if data[col].strip() == "" or data[col].strip() == "无" or len(data[col].strip()) < 4:
-            return False, col
-    return True, None
-
-def dataset_jsonl_transfer(origin_path, new_path):
-    """
-    将原始数据集转换为大模型微调所需数据格式的新数据集
-    """
-    messages = []
-    chunk_size = 1000
-    for chunk in pd.read_csv(
-        origin_path,
-        encoding='utf-8',
-        usecols=['department', 'title', 'ask', 'answer'],
-        na_values=['Unknown', 'N/A', ''],
-        chunksize=chunk_size
-    ):
-        required_columns = ["ask", "title", "department", "answer"]
-        for index, data in chunk.iterrows():
-            # 无效数据过滤
-            is_valid, empty_col = is_row_valid(data, required_columns)
-            if not is_valid:
-                # print(f"跳过第 {index} 行，列 '{empty_col}' 为空")
-                continue
-
-            # 解析每一行的数据
-            input = data["ask"]
-            core_question = data["title"]
-            dept = data["department"]
-            answer = data["answer"]
-            output = f"<department>{dept}</department> \n <core_question>{core_question}</core_question> \n {answer}"
-            message = {
-                "instruction": PROMPT,
-                "input": f"{input}",
-                "output": output,
-            }
-            messages.append(message)
-
-    # 保存重构后的JSONL文件
-    with open(new_path, "w", encoding="utf-8") as file:
-        for message in messages:
-            file.write(json.dumps(message, ensure_ascii=False) + "\n")
 
 
 def process_func(example):
@@ -287,28 +236,41 @@ if tokenizer.pad_token is None and tokenizer.eos_token is not None:
     tokenizer.pad_token = tokenizer.eos_token
 
 # 加载、处理数据集和测试集
-dataset_path = os.path.join(script_path, "data/raw_data_ft1.csv")
-jsonl_new_path = os.path.join(script_path, "data/data_format_ft1.jsonl")
-if os.path.exists(dataset_path):
-    dataset_jsonl_transfer(dataset_path, jsonl_new_path)
-else:
-    raise ValueError(f"原始数据集地址：{dataset_path} 不存在")
-full_df = pd.read_json(jsonl_new_path, lines=True)
+jsonl_path = os.path.join(script_path, "data/full_data_format_ft1.jsonl")
+if not os.path.exists(jsonl_path):
+    raise ValueError(f"数据集地址：{jsonl_path} 不存在")
+
+full_df = pd.read_json(jsonl_path, lines=True)
+
 # 整体数据量较大，我们只取一部分用作训练
-sampled_df = full_df.sample(frac=0.2, random_state=42)
-train_df, eval_df = train_test_split(
-    sampled_df,
+sampled_df = full_df.sample(frac=global_config.DATA_USE_FRAC, random_state=42)
+
+# 将DataFrame转换为Dataset
+dataset = Dataset.from_pandas(sampled_df)
+
+# 分割数据集 - 这里返回的是DatasetDict对象
+dataset_split = dataset.train_test_split(
     test_size=0.2,
-    random_state=42  # 设置随机种子保证可重复性
+    seed=42  # 设置随机种子保证可重复性
 )
 
-# 得到训练集
-train_ds = Dataset.from_pandas(train_df)
-train_dataset = train_ds.map(process_func, remove_columns=train_ds.column_names)
+# 得到训练集和验证集
+train_df = dataset_split['train']
+eval_df = dataset_split['test']
 
-# 得到验证集
-eval_ds = Dataset.from_pandas(eval_df)
-eval_dataset = eval_ds.map(process_func, remove_columns=eval_ds.column_names)
+print(f"训练集大小: {len(train_df)}")
+print(f"验证集大小: {len(eval_df)}")
+
+# 应用处理函数
+train_dataset = train_df.map(
+    process_func,
+    remove_columns=train_df.column_names
+)
+
+eval_dataset = eval_df.map(
+    process_func,
+    remove_columns=eval_df.column_names
+)
 
 # 使用能够为labels补 -100 的 collator
 collator = DataCollatorForSeq2Seq(tokenizer=tokenizer, padding=True, label_pad_token_id=-100)
@@ -347,13 +309,13 @@ trainer = Trainer(
 trainer.train()
 
 # 用验证集的前3条，主观看模型
-test_df = eval_df[:3]
+test_samples = eval_df[:3]
 
 test_text_list = []
 
-for index, row in test_df.iterrows():
-    instruction = row['instruction']
-    input_value = row['input']
+for index in range(len(test_samples) - 1):
+    instruction = test_samples['instruction'][index]
+    input_value = test_samples['input'][index]
 
     messages = [
         {"role": "system", "content": f"{instruction}"},
