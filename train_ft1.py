@@ -230,6 +230,14 @@ tokenizer = AutoTokenizer.from_pretrained(latest_checkpoint, use_fast=False, tru
 model.enable_input_require_grads()  # 开启梯度检查点时，要执行该方法
 model.to(device)
 
+# 在模型加载后立即添加
+print("当前dropout配置:")
+print(f"注意力dropout: {getattr(model.config, 'attention_dropout', '未设置')}")
+print(f"隐藏层dropout: {getattr(model.config, 'hidden_dropout_prob', '未设置')}")
+# 设置dropout
+model.config.attention_dropout = 0.1  # 注意力机制dropout
+model.config.hidden_dropout_prob = 0.1  # 全连接层dropout
+
 
 # 确保存在pad token，便于padding
 if tokenizer.pad_token is None and tokenizer.eos_token is not None:
@@ -292,10 +300,10 @@ args = TrainingArguments(
     report_to="swanlab",
     run_name=f"{global_config.MODEL_VERSION}-ft1",
     # 添加以下优化参数
-    warmup_steps=100,  # 添加热身
+    warmup_ratio=0.1, #按比例设置热身
     weight_decay=0.01,  # 添加权重衰减
     max_grad_norm=1.0,  # 梯度裁剪
-    lr_scheduler_type="cosine",  # 使用cosine学习率调度
+    lr_scheduler_type="cosine",  # 使用cosine学习率调度 余弦退火
 )
 
 trainer = Trainer(

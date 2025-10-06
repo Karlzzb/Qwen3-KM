@@ -148,16 +148,70 @@ python predict_lora.py                 # 模型推理脚本(第二轮LORA训练�
 - 脏数据的剔除非常重要，例如，提问中包含了title, 问题空白等数据的过滤
 - 科室数据比例失衡，会导致分类训练效果不佳。
 
-#### 参数调优
+#### 模型优化的四个主要手段：
+
+##### 1 标签平滑
+其中标签平滑在分类问题中使用，使得模型对训练数据的置信度从100%|0%的硬标签，转为软标签例如【98.9%，1.233%】。
+本次训练中在train_clf.py中使用
+```
+  # 添加标签平滑
+  label_smoothing_factor=0.1,  # 推荐值 0.1
+```
+
+##### 2 学习率预热
 - 第二阶段使用1e-4的学习率训练数最优
 - 第二阶段使用数据量20%最优，后续加大效果不明显。可参考swanlab中Qwen3-0.6B-ft1的5小时和8小时的训练监控数据对比
 - 添加下列参数后，效果提升
 ```
-  warmup_steps=100,  # 添加热身
+  warmup_ratio=0.1,  # 添加热身
   weight_decay=0.01,  # 添加权重衰减
-  max_grad_norm=1.0,  # 梯度裁剪
-  lr_scheduler_type="cosine",  # 使用cosine学习率调度
 ```
+##### 3 注意力Dropout配置
+在分诊和初诊模型中（推理模型）train_ft1.py
+```
+# 在模型加载后立即添加
+print("当前dropout配置:")
+print(f"注意力dropout: {getattr(model.config, 'attention_dropout', '未设置')}")
+print(f"隐藏层dropout: {getattr(model.config, 'hidden_dropout_prob', '未设置')}")
+# 设置dropout
+model.config.attention_dropout = 0.1  # 注意力机制dropout
+model.config.hidden_dropout_prob = 0.1  # 全连接层dropout
+```
+在分诊和初诊模型中（分类模型）train_clf.py
+```
+# 或者重新从config创建
+from transformers import AutoConfig
+config = AutoConfig.from_pretrained(model_dir)
+config.attention_dropout = 0.1
+config.hidden_dropout_prob = 0.1
+model = AutoModelForCausalLM.from_pretrained(model_dir, config=config, dtype=load_dtype)
+```
+Dropout值的经验建议
+- 小数据集（<10K样本）：0.2-0.3
+- 中等数据集（10K-100K）：0.1-0.2
+- 大数据集（>100K）：0.05-0.1
+- 注意力Dropout：通常比隐藏层Dropout小，0.05-0.1
+
+##### 4 梯度裁剪
+```
+  max_grad_norm=1.0,  # 梯度裁剪
+  lr_scheduler_type="cosine",  # 使用cosine学习率调度 余弦退火
+```
+经验法则
+- 文本生成任务：max_grad_norm = 0.5-1.5
+- 文本分类任务：max_grad_norm = 0.8-2.0
+- 小批量训练：需要相对较小的裁剪值
+- 大批量训练：可以承受稍大的梯度范数
+
+
+#### Transformer 梯度裁剪的超参数选择，推荐的 max_norm 值范围
+| 模型类型 | 推荐范围 | 说明 |
+|---------|----------|------|
+| BERT-base | 0.5 - 1.0 | 中等规模模型 |
+| BERT-large | 0.5 - 1.0 | 更大模型可能需要更严格的裁剪 |
+| GPT-2 | 1.0 - 2.0 | 语言模型通常使用稍大的阈值 |
+| T5 | 0.5 - 1.0 | 编码器-解码器架构 |
+| 自定义 Transformer | 0.5 - 2.0 | 根据模型深度调整 |
 
 ---
 ## 训练监控
