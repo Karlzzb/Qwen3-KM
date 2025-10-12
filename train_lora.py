@@ -75,23 +75,32 @@ def dataset_jsonl_transfer(origin_path, new_path):
 def process_func(example):
     """
     将数据集进行预处理
-    """ 
-    input_ids, attention_mask, labels = [], [], []
-    instruction = tokenizer(
-        f"<|im_start|>system\n{PROMPT}<|im_end|>\n<|im_start|>user\n{example['input']}<|im_end|>\n<|im_start|>assistant\n",
-        add_special_tokens=False,
+    """
+    # 使用聊天模板构建输入
+    messages = [
+        {"role": "system", "content": PROMPT},
+        {"role": "user", "content": example['input']},
+        {"role": "assistant", "content": example['output']}
+    ]
+
+    # 使用tokenizer的apply_chat_template方法，更可靠
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=False
     )
-    response = tokenizer(f"{example['output']}", add_special_tokens=False)
-    input_ids = instruction["input_ids"] + response["input_ids"] + [tokenizer.pad_token_id]
-    attention_mask = (
-        instruction["attention_mask"] + response["attention_mask"] + [1]
-    )
-    labels = [-100] * len(instruction["input_ids"]) + response["input_ids"] + [tokenizer.pad_token_id]
-    if len(input_ids) > MAX_LENGTH:  # 做一个截断
-        input_ids = input_ids[:MAX_LENGTH]
-        attention_mask = attention_mask[:MAX_LENGTH]
-        labels = labels[:MAX_LENGTH]
-    return {"input_ids": input_ids, "attention_mask": attention_mask, "labels": labels}   
+
+    # 分词
+    tokenized = tokenizer(text, truncation=True, max_length=MAX_LENGTH, padding=False)
+
+    # 标签就是input_ids的副本，但需要mask掉用户和系统部分
+    labels = tokenized["input_ids"].copy()
+
+    return {
+        "input_ids": tokenized["input_ids"],
+        "attention_mask": tokenized["attention_mask"],
+        "labels": labels
+    }
 
 def check_model_health(model):
     """检查模型权重是否健康"""
@@ -251,7 +260,7 @@ device, load_dtype = select_device_and_dtype()
 # 自动查找之前最新的 checkpoint
 # 构造相对于脚本所在目录的路径，使其不受运行位置的影响
 script_path = os.path.dirname(os.path.abspath(__file__))
-pre_output_dir = os.path.join(script_path, "output/Qwen3-0.6B")
+pre_output_dir = os.path.join(script_path, "output/Qwen3-0.6B-ft1")
 latest_checkpoint = "checkpoint-1000"
 if os.path.isdir(pre_output_dir):
     checkpoints = [
@@ -263,13 +272,10 @@ if os.path.isdir(pre_output_dir):
         checkpoints.sort(key=lambda x: int(x.split('-')[-1]))
         latest_checkpoint = os.path.join(pre_output_dir, checkpoints[-1])
         print(f"INFO: 自动找到最新的 checkpoint: {latest_checkpoint}")
-model = AutoModelForCausalLM.from_pretrained(latest_checkpoint, dtype=load_dtype)
-model.enable_input_require_grads()  # 开启梯度检查点时，要执行该方法
-model.to(device)
 
 # Transformers加载模型权重
 tokenizer = AutoTokenizer.from_pretrained(latest_checkpoint, use_fast=False, trust_remote_code=True)
-model = AutoModelForCausalLM.from_pretrained(latest_checkpoint, device_map="auto", dtype=torch.float32)
+model = AutoModelForCausalLM.from_pretrained(latest_checkpoint, device_map="auto" if device == "cuda" else None, dtype=torch.float32)
 model.enable_input_require_grads()  # 开启梯度检查点时，要执行该方法
 
 # 配置lora
@@ -288,21 +294,19 @@ config = LoraConfig(
     task_type=TaskType.CAUSAL_LM,
     target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
     inference_mode=False,  # 训练模式
-    r=4,  # Lora 秩
-    lora_alpha=16,  # Lora alaph，具体作用参见 Lora 原理
-    lora_dropout=0.1,  # Dropout 比例
+    r=8,  # Lora 秩
+    lora_alpha=32,  # Lora alaph，具体作用参见 Lora 原理
+    lora_dropout=0.05,  # Dropout 比例
 )
 
 model = get_peft_model(model, config)
 
 # 加载、处理数据集和测试集
-dataset_path = os.path.join(script_path, "data/raw_data_ft1.csv")
-jsonl_new_path = os.path.join(script_path, "data/data_format_ft1.jsonl")
-if os.path.exists(dataset_path):
-    dataset_jsonl_transfer(dataset_path, jsonl_new_path)
-else:
-    raise ValueError(f"原始数据集地址：{dataset_path} 不存在")
-full_df = pd.read_json(jsonl_new_path, lines=True)
+jsonl_path = os.path.join(script_path, "data/full_data_format_ft1.jsonl")
+if not os.path.exists(jsonl_path):
+    raise ValueError(f"数据集地址：{jsonl_path} 不存在")
+
+full_df = pd.read_json(jsonl_path, lines=True)
 sampled_df = full_df.sample(frac=0.04, random_state=42) #只取20%数据做一个预研
 train_df, eval_df = train_test_split(
     sampled_df,
@@ -320,9 +324,11 @@ eval_dataset = eval_ds.map(process_func, remove_columns=eval_ds.column_names)
 
 args = TrainingArguments(
     output_dir="./output/Qwen3-0.6B-lora",
-    per_device_train_batch_size=1,
-    per_device_eval_batch_size=1,
-    gradient_accumulation_steps=4,
+    per_device_train_batch_size=2,
+    per_device_eval_batch_size=2,
+    gradient_accumulation_steps=8,
+    ddp_find_unused_parameters=False,
+    remove_unused_columns=True,     # 节省内存
     eval_strategy="steps",
     eval_steps=100,
     logging_steps=10,
@@ -332,7 +338,9 @@ args = TrainingArguments(
     save_on_each_node=True,
     gradient_checkpointing=True,
     report_to="swanlab",
-    run_name="Qwen3-0.6B-lora",
+    run_name="Qwen3-0.6B-ft1-lora",
+    # 添加混合精度训练
+    fp16=torch.cuda.is_available(),
 )
 
 trainer = Trainer(

@@ -12,7 +12,7 @@ class Config:
     MODEL_VERSION:str = os.getenv("MODEL_VERSION")
     TRAIN_MODEL:str = f"{BASE_MODEL}/{MODEL_VERSION}"
     OUTPUT_DIR:str = f"output/{MODEL_VERSION}"
-    DATA_USE_FRAC:float = float(os.getenv("DATA_USE_FRAC", default=0.01))
+    DATA_USE_FRAC:float = float(os.getenv("DATA_USE_FRAC", default=0.002))
 
 
 
